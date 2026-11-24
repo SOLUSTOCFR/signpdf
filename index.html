@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>SignPDF — Signature de Contrat Mobile</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Caveat:wght@600&display=swap" rel="stylesheet">
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .font-handwriting { font-family: 'Caveat', cursive; }
+        #signatureCanvas { touch-action: none; cursor: crosshair; }
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .toast-animate { animation: slideUp 0.25s ease-out forwards; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="font-bold text-slate-900 text-base sm:text-lg leading-tight">SignPDF</h1>
+                    <p class="text-xs text-slate-500 hidden sm:block">Signature simple sur mobile &amp; ordinateur</p>
+                </div>
+            </div>
+
+            <div id="modeSwitcher" class="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                <button id="btnModeSender" onclick="switchMode('sender')" class="px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-all bg-white text-indigo-700 shadow-sm">
+                    Expéditeur
+                </button>
+                <button id="btnModeSigner" onclick="switchMode('signer')" class="px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-all text-slate-600 hover:text-slate-900">
+                    Destinataire
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
+
+        <!-- VUE EXPÉDITEUR -->
+        <section id="senderView" class="space-y-6">
+            <div class="bg-white rounded-2xl border border-slate-200 p-5 sm:p-8 shadow-sm">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                    <div>
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 mb-2">
+                            Étape 1 — Préparation
+                        </span>
+                        <h2 class="text-xl sm:text-2xl font-bold text-slate-900">Préparer un contrat à signer</h2>
+                        <p class="text-sm text-slate-500 mt-1">Renseignez le destinataire, envoyez-lui le lien <strong>et le PDF en pièce jointe</strong>. Il ouvre le lien, choisit le PDF, signe, et vous le renvoie.</p>
+                    </div>
+                    <button onclick="loadDemoContract()" class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-sm font-medium transition-colors shrink-0">
+                        Tester avec un contrat démo
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="space-y-4">
+                        <label class="block text-sm font-semibold text-slate-700">1. Document PDF du contrat (facultatif ici)</label>
+
+                        <div id="dropZone" class="relative border-2 border-dashed border-slate-300 hover:border-indigo-400 rounded-2xl p-6 text-center transition-colors bg-slate-50/70">
+                            <input type="file" id="pdfFileInput" accept="application/pdf,.pdf" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+                            <p class="text-sm font-medium text-slate-700">Cliquez ou glissez votre PDF ici</p>
+                            <p class="text-xs text-slate-500 mt-1">Pour tester. Le fichier reste sur votre appareil, rien n'est envoyé.</p>
+                        </div>
+
+                        <div id="loadedFileBanner" class="hidden flex items-center justify-between p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800">
+                            <div class="truncate">
+                                <p id="loadedFileName" class="text-sm font-semibold truncate">contrat.pdf</p>
+                                <p id="loadedFileMeta" class="text-xs text-emerald-700">Prêt pour la signature</p>
+                            </div>
+                            <button onclick="switchMode('signer')" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium shrink-0 ml-2">
+                                Prévisualiser →
+                            </button>
+                        </div>
+
+                        <div class="p-4 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 leading-relaxed">
+                            <strong>Confidentialité :</strong> cette page est publique. Ne déposez jamais un vrai contrat sur GitHub. Envoyez le PDF au destinataire par e-mail : il le choisira lui-même après avoir ouvert le lien.
+                        </div>
+                    </div>
+
+                    <div class="space-y-4">
+                        <label class="block text-sm font-semibold text-slate-700">2. Destinataire &amp; Expéditeur</label>
+
+                        <div>
+                            <label for="recipientName" class="block text-xs font-medium text-slate-600 mb-1">Nom du destinataire</label>
+                            <input type="text" id="recipientName" placeholder="Ex: Marie Dupont"
+                                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                                oninput="updateShareLink()">
+                        </div>
+
+                        <div>
+                            <label for="recipientEmail" class="block text-xs font-medium text-slate-600 mb-1">Adresse e-mail du destinataire</label>
+                            <input type="text" id="recipientEmail" placeholder="Ex: marie.dupont@email.fr"
+                                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                                oninput="updateShareLink()">
+                        </div>
+
+                        <div>
+                            <label for="senderEmail" class="block text-xs font-medium text-slate-600 mb-1">Votre adresse e-mail (retour du contrat signé)</label>
+                            <input type="email" id="senderEmail" placeholder="Ex: votre.nom@entreprise.fr"
+                                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                                oninput="updateShareLink()">
+                        </div>
+
+                        <div>
+                            <label for="contractTitle" class="block text-xs font-medium text-slate-600 mb-1">Objet / Nom du contrat</label>
+                            <input type="text" id="contractTitle" placeholder="Ex: Contrat de location"
+                                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                                oninput="updateShareLink()">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-8 pt-6 border-t border-slate-200 space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <label class="text-sm font-semibold text-slate-700">3. Lien de signature à transmettre</label>
+                        <span class="text-xs text-slate-500">Aucun compte requis pour le destinataire</span>
+                    </div>
+
+                    <div class="flex flex-col sm:flex-row gap-2.5">
+                        <input type="text" id="generatedLink" readonly
+                            class="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-xs sm:text-sm text-slate-600 font-mono select-all outline-none">
+                        <button onclick="copyShareLink()" class="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium transition-colors shrink-0">
+                            Copier le lien
+                        </button>
+                    </div>
+
+                    <div class="flex flex-wrap gap-3 pt-2">
+                        <button onclick="sendViaEmailClient()" class="flex-1 sm:flex-none px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold shadow-sm transition-colors">
+                            Écrire l'e-mail (puis joindre le PDF)
+                        </button>
+                        <button onclick="openAsSignerPreview()" class="flex-1 sm:flex-none px-5 py-3 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-sm font-semibold transition-colors">
+                            Simuler la vue destinataire
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- VUE DESTINATAIRE -->
+        <section id="signerView" class="hidden space-y-6">
+
+            <div class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700">
+                            Contrat à signer
+                        </span>
+                        <span id="signerPageIndicator" class="text-xs text-slate-500 font-medium hidden">Page 1 / 1</span>
+                    </div>
+                    <h2 id="signerContractTitle" class="text-lg sm:text-xl font-bold text-slate-900">Document PDF</h2>
+                    <p id="signerWelcomeText" class="text-xs sm:text-sm text-slate-500 mt-0.5">Choisissez le PDF reçu par e-mail, lisez-le, puis complétez la mention et signez.</p>
+                </div>
+
+                <label class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs sm:text-sm font-medium cursor-pointer transition-colors shrink-0">
+                    Choisir un autre PDF
+                    <input type="file" id="signerPdfInput" accept="application/pdf,.pdf" class="hidden">
+                </label>
+            </div>
+
+            <div class="bg-slate-200/70 rounded-2xl border border-slate-300 p-3 sm:p-6">
+                <div id="pdfEmptyState" class="py-12 text-center space-y-4">
+                    <div>
+                        <p class="text-sm font-semibold text-slate-700">Aucun contrat chargé pour le moment</p>
+                        <p class="text-xs text-slate-500 mt-1">Choisissez le PDF que vous avez reçu par e-mail.</p>
+                    </div>
+                    <label class="inline-block px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold shadow-sm transition-colors cursor-pointer">
+                        Choisir le PDF du contrat
+                        <input type="file" id="signerPdfInput2" accept="application/pdf,.pdf" class="hidden">
+                    </label>
+                    <div>
+                        <button onclick="loadDemoContract(true)" class="text-xs text-slate-500 underline">ou essayer avec le contrat de démonstration</button>
+                    </div>
+                </div>
+
+                <div id="pdfLoadingState" class="hidden py-12 text-center">
+                    <div class="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                    <p class="text-sm font-medium text-slate-600">Chargement du contrat PDF...</p>
+                </div>
+
+                <div id="pdfPagesContainer" class="hidden space-y-4 max-h-[65vh] overflow-y-auto pr-1"></div>
+            </div>
+
+            <div id="signingFormCard" class="bg-white rounded-2xl border border-slate-200 p-5 sm:p-8 shadow-sm space-y-6">
+                <div class="border-b border-slate-100 pb-4">
+                    <h3 class="text-lg font-bold text-slate-900">Approuver et signer le contrat</h3>
+                    <p class="text-xs sm:text-sm text-slate-500 mt-0.5">Votre signature et votre mention seront incrustées directement dans le PDF.</p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-4">
+                        <div>
+                            <label for="signerFullName" class="block text-sm font-semibold text-slate-700 mb-1.5">
+                                Votre Nom et Prénom <span class="text-rose-500">*</span>
+                            </label>
+                            <input type="text" id="signerFullName" placeholder="Ex: Marie Dupont"
+                                class="w-full px-4 py-3 rounded-xl border border-slate-300 text-base sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                        </div>
+
+                        <div>
+                            <div class="flex items-center justify-between mb-1.5">
+                                <label for="approvalText" class="block text-sm font-semibold text-slate-700">
+                                    Écrivez la mention <span class="text-indigo-600">« Lu et approuvé »</span> <span class="text-rose-500">*</span>
+                                </label>
+                                <span id="approvalStatusBadge" class="hidden text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">✓ Valide</span>
+                            </div>
+                            <input type="text" id="approvalText" placeholder="Tapez : Lu et approuvé"
+                                oninput="checkApprovalText()"
+                                class="w-full px-4 py-3 rounded-xl border border-slate-300 text-base sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                            <p class="text-xs text-slate-500 mt-1.5">Mention requise pour valider votre accord.</p>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-2 pt-1">
+                            <div>
+                                <label for="sigPosition" class="block text-xs font-semibold text-slate-600 mb-1">Côté</label>
+                                <select id="sigPosition" class="w-full px-2 py-2.5 rounded-xl border border-slate-300 text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500">
+                                    <option value="bottom-right" selected>Droite</option>
+                                    <option value="bottom-left">Gauche</option>
+                                    <option value="bottom-center">Centre</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="sigVertical" class="block text-xs font-semibold text-slate-600 mb-1">Hauteur</label>
+                                <select id="sigVertical" class="w-full px-2 py-2.5 rounded-xl border border-slate-300 text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500">
+                                    <option value="bottom" selected>Bas</option>
+                                    <option value="middle">Milieu</option>
+                                    <option value="top">Haut</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="sigPageSelect" class="block text-xs font-semibold text-slate-600 mb-1">Page</label>
+                                <select id="sigPageSelect" class="w-full px-2 py-2.5 rounded-xl border border-slate-300 text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500">
+                                    <option value="last" selected>Dernière</option>
+                                    <option value="first">Première</option>
+                                </select>
+                            </div>
+                        </div>
+                        <p class="text-[11px] text-slate-400">Choisissez un emplacement qui ne cache pas de texte du contrat.</p>
+                    </div>
+
+                    <div class="space-y-2.5">
+                        <div class="flex items-center justify-between">
+                            <label class="block text-sm font-semibold text-slate-700">
+                                Votre signature <span class="text-rose-500">*</span>
+                            </label>
+                            <div class="flex items-center gap-2">
+                                <button type="button" onclick="setInkColor('#0f172a')" id="inkBlack" title="Encre noire" class="w-5 h-5 rounded-full bg-slate-900 ring-2 ring-offset-1 ring-indigo-500"></button>
+                                <button type="button" onclick="setInkColor('#1d4ed8')" id="inkBlue" title="Encre bleue" class="w-5 h-5 rounded-full bg-blue-700"></button>
+                                <button type="button" onclick="clearSignature()" class="ml-1 text-xs font-medium text-rose-600 hover:text-rose-700 px-2 py-1 rounded-lg hover:bg-rose-50 transition-colors">
+                                    Effacer
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="signatureWrapper" class="relative w-full h-48 sm:h-52 rounded-2xl border-2 border-slate-300 bg-slate-50 overflow-hidden shadow-inner">
+                            <canvas id="signatureCanvas" class="w-full h-full block"></canvas>
+                            <div id="signaturePlaceholder" class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-slate-400 select-none">
+                                <span class="font-handwriting text-2xl opacity-60">Signez ici</span>
+                                <span class="text-[11px] mt-1">Utilisez votre doigt sur smartphone</span>
+                            </div>
+                            <div class="pointer-events-none absolute bottom-7 left-6 right-6 border-b border-dashed border-slate-300"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <label class="flex items-start gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer">
+                    <input type="checkbox" id="consentCheckbox" class="mt-0.5 w-5 h-5 rounded text-indigo-600 border-slate-300 focus:ring-indigo-500">
+                    <span class="text-xs sm:text-sm text-slate-700 leading-relaxed">
+                        Je certifie avoir pris connaissance de l'intégralité du document ci-dessus et j'accepte de le signer électroniquement avec la mention <strong>« Lu et approuvé »</strong>.
+                    </span>
+                </label>
+
+                <button id="btnSignContract" onclick="finalizeAndSignPdf()" class="w-full py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-bold text-base shadow-md transition-all flex items-center justify-center gap-2.5">
+                    Valider et signer le contrat PDF
+                </button>
+            </div>
+
+            <div id="signedSuccessCard" class="hidden bg-emerald-50 rounded-2xl border-2 border-emerald-200 p-6 sm:p-8 text-center space-y-5 shadow-sm">
+                <div class="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
+                    <svg class="w-9 h-9" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/>
+                    </svg>
+                </div>
+                <div>
+                    <h3 class="text-xl sm:text-2xl font-bold text-emerald-900">Contrat signé avec succès !</h3>
+                    <p class="text-sm text-emerald-800 mt-1 max-w-md mx-auto">
+                        Votre signature, la mention « Lu et approuvé » et la date ont été apposées sur le PDF.
+                    </p>
+                </div>
+
+                <div class="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                    <button onclick="shareOrReturnSignedPdf()" class="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm shadow-sm transition-colors">
+                        Renvoyer à l'expéditeur
+                    </button>
+                    <button onclick="downloadSignedPdf()" class="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-white hover:bg-emerald-100/50 text-emerald-800 border border-emerald-300 font-semibold text-sm transition-colors">
+                        Télécharger le PDF signé
+                    </button>
+                </div>
+
+                <button onclick="resetToEditSignature()" class="text-xs text-emerald-700 hover:underline pt-2 inline-block">
+                    Modifier ma signature
+                </button>
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="py-5 text-center text-xs text-slate-400 border-t border-slate-200 bg-white mt-auto">
+        Traitement 100 % local dans votre navigateur — le document n'est envoyé nulle part.
+    </footer>
+
+    <div id="toastContainer" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none w-[90%] max-w-md flex flex-col items-center gap-2"></div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        const state = {
+            mode: 'sender',
+            pdfBytes: null,
+            pdfFileName: 'contrat.pdf',
+            totalPages: 0,
+            signedPdfBytes: null,
+            signedFileName: 'contrat-signe.pdf',
+            senderEmail: '',
+            inkColor: '#0f172a',
+            isDrawing: false,
+            hasSignature: false,
+            lastPoint: null,
+            sigW: 0
+        };
+
+        // ---- Toasts ----
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            const colors = {
+                info: 'bg-slate-900 text-white',
+                success: 'bg-emerald-600 text-white',
+                error: 'bg-rose-600 text-white'
+            };
+            toast.className = `toast-animate pointer-events-auto px-4 py-3 rounded-xl shadow-lg text-sm font-medium text-center ${colors[type] || colors.info}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transition = 'opacity 0.3s ease';
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        }
+
+        // ---- Navigation ----
+        function switchMode(newMode) {
+            state.mode = newMode;
+            const senderView = document.getElementById('senderView');
+            const signerView = document.getElementById('signerView');
+            const btnSender = document.getElementById('btnModeSender');
+            const btnSigner = document.getElementById('btnModeSigner');
+            const on = 'px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-all bg-white text-indigo-700 shadow-sm';
+            const off = 'px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-all text-slate-600 hover:text-slate-900';
+
+            if (newMode === 'sender') {
+                senderView.classList.remove('hidden');
+                signerView.classList.add('hidden');
+                btnSender.className = on;
+                btnSigner.className = off;
+            } else {
+                senderView.classList.add('hidden');
+                signerView.classList.remove('hidden');
+                btnSigner.className = on;
+                btnSender.className = off;
+                requestAnimationFrame(() => resizeSignatureCanvas(true));
+
+                const title = document.getElementById('contractTitle').value.trim();
+                const name = document.getElementById('recipientName').value.trim();
+                if (title) document.getElementById('signerContractTitle').textContent = title;
+                if (name && !document.getElementById('signerFullName').value) {
+                    document.getElementById('signerFullName').value = name;
+                    document.getElementById('signerWelcomeText').textContent = `Bonjour ${name}, lisez le contrat puis signez-le ci-dessous.`;
+                }
+                if (state.pdfBytes && document.getElementById('pdfPagesContainer').children.length === 0) {
+                    renderPdfPreview(state.pdfBytes);
+                }
+            }
+        }
+
+        function openAsSignerPreview() {
+            state.senderEmail = document.getElementById('senderEmail').value.trim();
+            switchMode('signer');
+        }
+
+        // ---- Import PDF ----
+        function isPdfFile(file) {
+            return file && (file.type === 'application/pdf' || /\.pdf$/i.test(file.name));
+        }
+
+        async function handlePdfFileUpload(file) {
+            if (!isPdfFile(file)) {
+                showToast('Veuillez sélectionner un fichier au format PDF.', 'error');
+                return;
+            }
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                state.pdfBytes = new Uint8Array(arrayBuffer);
+                state.pdfFileName = file.name;
+                state.signedPdfBytes = null;
+
+                document.getElementById('loadedFileBanner').classList.remove('hidden');
+                document.getElementById('loadedFileName').textContent = file.name;
+                document.getElementById('loadedFileMeta').textContent = `${(file.size / 1024).toFixed(0)} Ko — prêt pour la signature`;
+
+                showToast(`Document "${file.name}" chargé.`, 'success');
+
+                // Retour à l'état « à signer » si on avait déjà signé
+                document.getElementById('signedSuccessCard').classList.add('hidden');
+                document.getElementById('signingFormCard').classList.remove('hidden');
+
+                if (state.mode === 'signer') {
+                    await renderPdfPreview(state.pdfBytes);
+                }
+            } catch (err) {
+                console.error('Erreur chargement PDF:', err);
+                showToast('Impossible de lire ce fichier PDF.', 'error');
+            }
+        }
+
+        async function loadDemoContract(autoSwitchToSigner = false) {
+            try {
+                const { PDFDocument, StandardFonts, rgb } = PDFLib;
+                const pdfDoc = await PDFDocument.create();
+                const page = pdfDoc.addPage([595.28, 841.89]);
+                const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+                const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+                page.drawRectangle({ x: 0, y: 760, width: 595.28, height: 82, color: rgb(0.24, 0.28, 0.65) });
+                page.drawText('CONTRAT DE DEMONSTRATION', { x: 50, y: 798, size: 18, font: fontBold, color: rgb(1, 1, 1) });
+                page.drawText('Document fictif pour tester la signature', { x: 50, y: 778, size: 10, font: fontRegular, color: rgb(0.85, 0.88, 1) });
+
+                const lines = [
+                    'Entre les soussignes :',
+                    'La Partie A, ci-apres denommee "Le Bailleur",',
+                    'Et la Partie B, ci-apres denommee "Le Preneur".',
+                    '',
+                    'Article 1 - Objet',
+                    'Le present document est un exemple fictif sans valeur contractuelle.',
+                    '',
+                    'Article 2 - Signature',
+                    'Il prend effet a la date de signature electronique,',
+                    'accompagnee de la mention "Lu et approuve".',
+                    '',
+                    'Fait pour valoir ce que de droit.'
+                ];
+                let y = 710;
+                for (const line of lines) {
+                    const isHeading = line.startsWith('Article') || line.startsWith('Entre');
+                    page.drawText(line, { x: 50, y, size: isHeading ? 12 : 11, font: isHeading ? fontBold : fontRegular, color: rgb(0.15, 0.18, 0.24) });
+                    y -= isHeading ? 24 : 20;
+                }
+
+                state.pdfBytes = await pdfDoc.save();
+                state.pdfFileName = 'contrat-demonstration.pdf';
+                state.signedPdfBytes = null;
+
+                document.getElementById('loadedFileBanner').classList.remove('hidden');
+                document.getElementById('loadedFileName').textContent = state.pdfFileName;
+                document.getElementById('loadedFileMeta').textContent = '1 page A4 — contrat de démonstration';
+
+                showToast('Contrat de démonstration généré.', 'success');
+
+                if (autoSwitchToSigner || state.mode === 'signer') {
+                    switchMode('signer');
+                    await renderPdfPreview(state.pdfBytes);
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('Erreur lors de la génération du contrat de démonstration.', 'error');
+            }
+        }
+
+        // ---- Rendu PDF ----
+        async function renderPdfPreview(pdfBytes) {
+            const container = document.getElementById('pdfPagesContainer');
+            const emptyState = document.getElementById('pdfEmptyState');
+            const loadingState = document.getElementById('pdfLoadingState');
+            const pageIndicator = document.getElementById('signerPageIndicator');
+
+            emptyState.classList.add('hidden');
+            container.classList.add('hidden');
+            loadingState.classList.remove('hidden');
+            container.innerHTML = '';
+
+            try {
+                const dataCopy = new Uint8Array(pdfBytes);
+                const pdf = await pdfjsLib.getDocument({ data: dataCopy }).promise;
+                state.totalPages = pdf.numPages;
+
+                pageIndicator.textContent = `${pdf.numPages} page${pdf.numPages > 1 ? 's' : ''}`;
+                pageIndicator.classList.remove('hidden');
+
+                for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                    const page = await pdf.getPage(pageNum);
+                    const scale = window.innerWidth < 640 ? 1.3 : 1.75;
+                    const viewport = page.getViewport({ scale });
+
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200 mx-auto';
+                    wrapper.style.maxWidth = '780px';
+
+                    const canvas = document.createElement('canvas');
+                    canvas.className = 'w-full h-auto block';
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+                    const footer = document.createElement('div');
+                    footer.className = 'bg-slate-50 px-3 py-1.5 text-[11px] text-slate-400 text-right border-t border-slate-100';
+                    footer.textContent = `Page ${pageNum} / ${pdf.numPages}`;
+
+                    wrapper.appendChild(canvas);
+                    wrapper.appendChild(footer);
+                    container.appendChild(wrapper);
+                }
+
+                loadingState.classList.add('hidden');
+                container.classList.remove('hidden');
+            } catch (err) {
+                console.error('Erreur affichage PDF:', err);
+                loadingState.classList.add('hidden');
+                emptyState.classList.remove('hidden');
+                showToast("Impossible d'afficher ce PDF. Vérifiez le fichier.", 'error');
+            }
+        }
+
+        // ---- Lien de partage & e-mail ----
+        function updateShareLink() {
+            const baseUrl = window.location.origin + window.location.pathname;
+            const params = new URLSearchParams();
+            params.set('mode', 'sign');
+
+            const recipientName = document.getElementById('recipientName').value.trim();
+            const senderEmail = document.getElementById('senderEmail').value.trim();
+            const title = document.getElementById('contractTitle').value.trim();
+
+            if (recipientName) params.set('name', recipientName);
+            if (senderEmail) params.set('from', senderEmail);
+            if (title) params.set('title', title);
+
+            document.getElementById('generatedLink').value = `${baseUrl}?${params.toString()}`;
+        }
+
+        function copyShareLink() {
+            const input = document.getElementById('generatedLink');
+            input.select();
+            input.setSelectionRange(0, 99999);
+            const done = () => showToast('Lien de signature copié !', 'success');
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(input.value).then(done).catch(() => {
+                    try { document.execCommand('copy'); done(); } catch (e) { showToast('Sélectionnez le lien pour le copier.', 'info'); }
+                });
+            } else {
+                try { document.execCommand('copy'); done(); } catch (e) { showToast('Sélectionnez le lien pour le copier.', 'info'); }
+            }
+        }
+
+        function sendViaEmailClient() {
+            const to = document.getElementById('recipientEmail').value.trim();
+            const name = document.getElementById('recipientName').value.trim() || 'Madame, Monsieur';
+            const title = document.getElementById('contractTitle').value.trim() || 'Contrat à signer';
+            const link = document.getElementById('generatedLink').value;
+
+            const subject = encodeURIComponent(`Signature requise : ${title}`);
+            const body = encodeURIComponent(
+                `Bonjour ${name},\n\n` +
+                `Je vous envoie le contrat "${title}" en pièce jointe (PDF).\n\n` +
+                `Pour le signer depuis votre téléphone ou votre ordinateur :\n` +
+                `1. Ouvrez ce lien : ${link}\n` +
+                `2. Touchez "Choisir le PDF du contrat" et sélectionnez le fichier reçu\n` +
+                `3. Écrivez "Lu et approuvé", signez au doigt, puis touchez "Renvoyer à l'expéditeur"\n\n` +
+                `Cordialement.`
+            );
+            window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
+            showToast("N'oubliez pas de joindre le PDF à l'e-mail.", 'info');
+        }
+
+        // ---- Canvas de signature ----
+        const sigCanvas = document.getElementById('signatureCanvas');
+        const sigCtx = sigCanvas.getContext('2d');
+
+        function resizeSignatureCanvas(force = false) {
+            const wrapper = document.getElementById('signatureWrapper');
+            if (!wrapper || wrapper.clientWidth === 0) return;
+            // Évite d'effacer/déformer la signature quand la barre d'adresse mobile se rétracte
+            if (!force && wrapper.clientWidth === state.sigW) return;
+            if (state.isDrawing) return;
+
+            const previousData = state.hasSignature ? sigCanvas.toDataURL() : null;
+            const dpr = window.devicePixelRatio || 1;
+            state.sigW = wrapper.clientWidth;
+
+            sigCanvas.width = wrapper.clientWidth * dpr;
+            sigCanvas.height = wrapper.clientHeight * dpr;
+            sigCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            sigCtx.lineCap = 'round';
+            sigCtx.lineJoin = 'round';
+            sigCtx.lineWidth = 2.6;
+            sigCtx.strokeStyle = state.inkColor;
+
+            if (previousData) {
+                const img = new Image();
+                img.onload = () => sigCtx.drawImage(img, 0, 0, wrapper.clientWidth, wrapper.clientHeight);
+                img.src = previousData;
+            }
+        }
+
+        function getPointerPos(e) {
+            const rect = sigCanvas.getBoundingClientRect();
+            const t = e.touches && e.touches[0] ? e.touches[0] : e;
+            return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+        }
+
+        function startDrawing(e) {
+            e.preventDefault();
+            state.isDrawing = true;
+            state.lastPoint = getPointerPos(e);
+            document.getElementById('signaturePlaceholder').classList.add('hidden');
+
+            sigCtx.beginPath();
+            sigCtx.fillStyle = state.inkColor;
+            sigCtx.arc(state.lastPoint.x, state.lastPoint.y, 1.3, 0, Math.PI * 2);
+            sigCtx.fill();
+            state.hasSignature = true;
+        }
+
+        function draw(e) {
+            if (!state.isDrawing) return;
+            e.preventDefault();
+            const p = getPointerPos(e);
+            sigCtx.beginPath();
+            sigCtx.strokeStyle = state.inkColor;
+            sigCtx.lineWidth = 2.6;
+            sigCtx.moveTo(state.lastPoint.x, state.lastPoint.y);
+            sigCtx.lineTo(p.x, p.y);
+            sigCtx.stroke();
+            state.lastPoint = p;
+            state.hasSignature = true;
+        }
+
+        function stopDrawing() {
+            state.isDrawing = false;
+            state.lastPoint = null;
+        }
+
+        function setInkColor(color) {
+            state.inkColor = color;
+            const toggle = (id, active) => {
+                const el = document.getElementById(id);
+                el.classList.toggle('ring-2', active);
+                el.classList.toggle('ring-offset-1', active);
+                el.classList.toggle('ring-indigo-500', active);
+            };
+            toggle('inkBlack', color === '#0f172a');
+            toggle('inkBlue', color === '#1d4ed8');
+        }
+
+        function clearSignature() {
+            const wrapper = document.getElementById('signatureWrapper');
+            sigCtx.clearRect(0, 0, wrapper.clientWidth, wrapper.clientHeight);
+            state.hasSignature = false;
+            document.getElementById('signaturePlaceholder').classList.remove('hidden');
+        }
+
+        sigCanvas.addEventListener('mousedown', startDrawing);
+        sigCanvas.addEventListener('mousemove', draw);
+        window.addEventListener('mouseup', stopDrawing);
+        sigCanvas.addEventListener('touchstart', startDrawing, { passive: false });
+        sigCanvas.addEventListener('touchmove', draw, { passive: false });
+        sigCanvas.addEventListener('touchend', stopDrawing);
+        sigCanvas.addEventListener('touchcancel', stopDrawing);
+
+        // ---- Mention « Lu et approuvé » ----
+        function normalizeText(str) {
+            return str.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
+        }
+
+        function checkApprovalText() {
+            const val = document.getElementById('approvalText').value;
+            const isValid = normalizeText(val).includes('lu et approuve');
+            document.getElementById('approvalStatusBadge').classList.toggle('hidden', !isValid);
+            return isValid;
+        }
+
+        // ---- Empreinte SHA-256 du document d'origine ----
+        async function sha256Short(bytes) {
+            try {
+                const buf = await crypto.subtle.digest('SHA-256', bytes);
+                return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
+            } catch (e) {
+                return null;
+            }
+        }
+
+        // ---- Incrustation dans le PDF ----
+        async function finalizeAndSignPdf() {
+            if (!state.pdfBytes) {
+                showToast("Veuillez d'abord choisir le PDF du contrat.", 'error');
+                return;
+            }
+
+            const fullName = document.getElementById('signerFullName').value.trim();
+            const approvalRaw = document.getElementById('approvalText').value.trim();
+            const consent = document.getElementById('consentCheckbox').checked;
+
+            if (!fullName) { showToast('Veuillez saisir votre nom et prénom.', 'error'); document.getElementById('signerFullName').focus(); return; }
+            if (!checkApprovalText()) { showToast('Veuillez écrire la mention « Lu et approuvé ».', 'error'); document.getElementById('approvalText').focus(); return; }
+            if (!state.hasSignature) { showToast('Veuillez dessiner votre signature dans le cadre prévu.', 'error'); return; }
+            if (!consent) { showToast('Veuillez cocher la case de confirmation avant de signer.', 'error'); return; }
+
+            const btn = document.getElementById('btnSignContract');
+            const btnHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span> Génération du PDF signé...';
+
+            try {
+                const { PDFDocument, StandardFonts, rgb } = PDFLib;
+                const pdfDoc = await PDFDocument.load(state.pdfBytes);
+                const pages = pdfDoc.getPages();
+
+                const page = document.getElementById('sigPageSelect').value === 'first' ? pages[0] : pages[pages.length - 1];
+                const { width, height } = page.getSize();
+
+                const sigImage = await pdfDoc.embedPng(sigCanvas.toDataURL('image/png'));
+                const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+                const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+                const boxWidth = 210;
+                const boxHeight = 118;
+                const position = document.getElementById('sigPosition').value;
+                let boxX = width - boxWidth - 45;
+                if (position === 'bottom-left') boxX = 45;
+                if (position === 'bottom-center') boxX = (width - boxWidth) / 2;
+
+                const vertical = document.getElementById('sigVertical').value;
+                let boxY = 45;
+                if (vertical === 'middle') boxY = (height - boxHeight) / 2;
+                if (vertical === 'top') boxY = height - boxHeight - 45;
+
+                page.drawRectangle({
+                    x: boxX, y: boxY, width: boxWidth, height: boxHeight,
+                    color: rgb(1, 1, 1), opacity: 0.95,
+                    borderColor: rgb(0.3, 0.35, 0.7), borderWidth: 0.8
+                });
+
+                // Les polices standard ne gèrent que WinAnsi (é, è, à, ç… OK)
+                const safeText = (txt) => txt.replace(/[^\x20-\xFF]/g, '');
+
+                const now = new Date();
+                const dateStr = now.toLocaleDateString('fr-FR') + ' à ' + now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                const hash = await sha256Short(state.pdfBytes);
+
+                page.drawText(safeText(approvalRaw), { x: boxX + 10, y: boxY + boxHeight - 16, size: 10, font: fontBold, color: rgb(0.1, 0.14, 0.25) });
+                page.drawText(safeText(`Signé par : ${fullName}`), { x: boxX + 10, y: boxY + boxHeight - 28, size: 8, font: fontRegular, color: rgb(0.3, 0.35, 0.45) });
+                page.drawText(safeText(`Le ${dateStr}`), { x: boxX + 10, y: boxY + 16, size: 7.5, font: fontRegular, color: rgb(0.45, 0.5, 0.58) });
+                if (hash) {
+                    page.drawText(`Empreinte du document (SHA-256) : ${hash}`, { x: boxX + 10, y: boxY + 6, size: 5.5, font: fontRegular, color: rgb(0.55, 0.58, 0.65) });
+                }
+
+                const sigDims = sigImage.scaleToFit(boxWidth - 20, 56);
+                page.drawImage(sigImage, {
+                    x: boxX + (boxWidth - sigDims.width) / 2,
+                    y: boxY + 28,
+                    width: sigDims.width,
+                    height: sigDims.height
+                });
+
+                state.signedPdfBytes = await pdfDoc.save();
+                const baseName = state.pdfFileName.replace(/\.pdf$/i, '');
+                state.signedFileName = `${baseName}-signe.pdf`;
+
+                await renderPdfPreview(state.signedPdfBytes);
+
+                document.getElementById('signingFormCard').classList.add('hidden');
+                document.getElementById('signedSuccessCard').classList.remove('hidden');
+                document.getElementById('signedSuccessCard').scrollIntoView({ behavior: 'smooth' });
+
+                showToast('Contrat signé ! Renvoyez-le ou téléchargez-le.', 'success');
+            } catch (err) {
+                console.error('Erreur signature PDF:', err);
+                showToast('Erreur lors de la génération du PDF signé (PDF protégé par mot de passe ?).', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = btnHtml;
+            }
+        }
+
+        function downloadSignedPdf() {
+            if (!state.signedPdfBytes) return;
+            const blob = new Blob([state.signedPdfBytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = state.signedFileName;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        async function shareOrReturnSignedPdf() {
+            if (!state.signedPdfBytes) return;
+            const file = new File([state.signedPdfBytes], state.signedFileName, { type: 'application/pdf' });
+
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                try {
+                    await navigator.share({
+                        title: `Contrat signé - ${state.signedFileName}`,
+                        text: 'Bonjour, voici le contrat signé avec la mention "Lu et approuvé".',
+                        files: [file]
+                    });
+                    return;
+                } catch (err) {
+                    if (err.name === 'AbortError') return;
+                }
+            }
+
+            downloadSignedPdf();
+            const fullName = document.getElementById('signerFullName').value.trim();
+            const subject = encodeURIComponent(`Contrat signé : ${state.signedFileName}`);
+            const body = encodeURIComponent(
+                `Bonjour,\n\nVeuillez trouver ci-joint le contrat signé par ${fullName} avec la mention "Lu et approuvé".\n` +
+                `(Le fichier "${state.signedFileName}" vient d'être téléchargé : joignez-le à cet e-mail.)\n\nCordialement.`
+            );
+            showToast("PDF téléchargé ! Joignez-le à l'e-mail qui va s'ouvrir.", 'info');
+            setTimeout(() => {
+                window.location.href = `mailto:${state.senderEmail || ''}?subject=${subject}&body=${body}`;
+            }, 600);
+        }
+
+        function resetToEditSignature() {
+            document.getElementById('signedSuccessCard').classList.add('hidden');
+            document.getElementById('signingFormCard').classList.remove('hidden');
+            if (state.pdfBytes) renderPdfPreview(state.pdfBytes);
+            requestAnimationFrame(() => resizeSignatureCanvas(true));
+        }
+
+        // ---- Initialisation ----
+        async function initApp() {
+            const onPick = (e) => { if (e.target.files[0]) handlePdfFileUpload(e.target.files[0]); e.target.value = ''; };
+            document.getElementById('pdfFileInput').addEventListener('change', onPick);
+            document.getElementById('signerPdfInput').addEventListener('change', onPick);
+            document.getElementById('signerPdfInput2').addEventListener('change', onPick);
+
+            const dropZone = document.getElementById('dropZone');
+            dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-indigo-500', 'bg-indigo-50/50'); });
+            dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-indigo-500', 'bg-indigo-50/50'));
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('border-indigo-500', 'bg-indigo-50/50');
+                if (e.dataTransfer.files[0]) handlePdfFileUpload(e.dataTransfer.files[0]);
+            });
+
+            window.addEventListener('resize', () => { if (state.mode === 'signer') resizeSignatureCanvas(); });
+
+            updateShareLink();
+
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('mode') === 'sign') {
+                document.getElementById('modeSwitcher').classList.add('hidden');
+
+                const name = params.get('name');
+                const title = params.get('title');
+                const from = params.get('from');
+
+                if (from) state.senderEmail = from;
+                if (title) document.getElementById('signerContractTitle').textContent = title;
+                if (name) {
+                    document.getElementById('signerFullName').value = name;
+                    document.getElementById('signerWelcomeText').textContent = `Bonjour ${name}, choisissez le PDF reçu par e-mail, lisez-le, puis signez.`;
+                }
+                switchMode('signer');
+            }
+        }
+
+        window.addEventListener('load', initApp);
+    </script>
+</body>
+</html>
