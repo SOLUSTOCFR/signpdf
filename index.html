@@ -246,7 +246,8 @@
                             <div>
                                 <label for="sigVertical" class="block text-xs font-semibold text-slate-600 mb-1">Hauteur</label>
                                 <select id="sigVertical" class="w-full px-2 py-2.5 rounded-xl border border-slate-300 text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500">
-                                    <option value="bottom" selected>Bas</option>
+                                    <option value="auto" selected>Auto (sous « Lu et approuvé »)</option>
+                                    <option value="bottom">Bas</option>
                                     <option value="middle">Milieu</option>
                                     <option value="top">Haut</option>
                                 </select>
@@ -766,6 +767,22 @@
                 let boxY = 45;
                 if (vertical === 'middle') boxY = (height - boxHeight) / 2;
                 if (vertical === 'top') boxY = height - boxHeight - 45;
+                if (vertical === 'auto') {
+                    // Cherche la mention « Lu et approuvé » imprimée dans le contrat (colonne la plus à droite)
+                    try {
+                        const pageNumber = document.getElementById('sigPageSelect').value === 'first' ? 1 : pages.length;
+                        const pj = await pdfjsLib.getDocument({ data: new Uint8Array(state.pdfBytes) }).promise;
+                        const tc = await (await pj.getPage(pageNumber)).getTextContent();
+                        const hits = tc.items
+                            .filter(i => normalizeText(i.str).includes('lu et approuve'))
+                            .map(i => ({ x: i.transform[4], y: i.transform[5] }));
+                        if (hits.length) {
+                            const best = hits.reduce((a, b) => (b.x > a.x ? b : a));
+                            boxX = Math.max(20, Math.min(width - boxWidth - 20, best.x));
+                            boxY = Math.max(20, best.y - 10 - boxHeight);
+                        }
+                    } catch (e) { console.warn('Placement auto impossible', e); }
+                }
 
                 page.drawRectangle({
                     x: boxX, y: boxY, width: boxWidth, height: boxHeight,
